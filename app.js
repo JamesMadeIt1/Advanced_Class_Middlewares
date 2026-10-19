@@ -1,21 +1,23 @@
 const express = require('express');
 const app = express();
 require('dotenv').config();
-
-const logger = require('./logger');
-const glocalErrorhandler = require('./global_error_handler');
-const validator = require('./validator');
-const validatePatchTodo = require('./validator_for_PATCH_request');
+const mongoose = require('mongoose');
+const logger = require('./Middlewares/logger');
+const glocalErrorhandler = require('./Middlewares/global_error_handler');
+const validator = require('./Middlewares/validator');
+const validatePatchTodo = require('./Middlewares/validator_for_PATCH_request');
 const cors = require('cors');
-
-const PORT = process.env.PORT || 3000;
+const Todo = require('./Models/todo.Models');
+const ConnectDB = require('./Database/db');
+const PORT = process.env.PORT || 3002;
+ConnectDB();
 
 // Parse incoming JSON request
 app.use(express.json());
 
 // Middleware
 const corsOptions = {
-  origin: 'http://localhost:3000'
+  origin: 'http://localhost:3002'
 };
 
 app.use(cors(corsOptions));
@@ -23,16 +25,10 @@ app.use(logger);
 
 
 
-//creating todos array
-let todos = [
-    {id: 1,task: "Learn Node.js",Completed: false},
-    {id: 2,task: "Learn Express.js",Completed: false},
-    {id: 3,task: "Build a REST API",Completed: false},
-    {id: 4,task: "Build a CRUD API",Completed: false}
-]
-
 //GET all todos
-app.get('/todos' ,(req ,res ,next)=>{
+app.get('/todos' ,async(req ,res ,next)=>{
+
+  const todos = await Todo.find({}); //returns all todos in MongoDB database
   try{
      res.status(200).json(todos)
   }catch(error){
@@ -42,14 +38,14 @@ app.get('/todos' ,(req ,res ,next)=>{
 
 
 //GET specific todos
-app.get('/todos/:id' ,(req ,res ,next)=>{
+app.get('/todos/:id' ,async(req ,res ,next)=>{
   try{
-    const id = parseInt(req.params.id);
-    const todo = todos.find((todo) => todo.id === id);
-
-     if(isNaN(id)){
-      return res.status(404).json({error: "Invalid ID"});
+    const id = req.params.id;
+    if(!mongoose.isObjectIdOrHexString(id)){
+      return res.status(400).json({error: "Invalid ID"});
      }
+    const todo = await Todo.findById(id);  //returns the todo the specific id in MongoDB database
+
     if(!todo){
       return res.status(404).json({error: "Todo not found"});
     }
@@ -62,46 +58,41 @@ app.get('/todos/:id' ,(req ,res ,next)=>{
 
 
 //POST a todo
-app.post('/todos',validator,(req ,res ,next)=>{
+app.post('/todos',validator,async (req ,res ,next)=>{
   
   try{
-      const {task} = req.body;
-  if(!task){
-    return res.status(400).json({message: "Task is required"});
-  }
+      const {task ,Completed} = req.body;
+      const newTodo = new Todo({ task,Completed}) //validates The data and creates a new instance of the Todo model
+      await newTodo.save(); //insert the new todo into MongoDB database
+      res.status(201).json({message: "Todo created successfully", todo: newTodo});
 
-  const newTodo = { id: todos.length + 1, task, Completed: false };
-  todos.push(newTodo);
-  return res.status(201).json(newTodo);
-
-}catch(error){
+  }catch(error){
     next(error)
   }});
  
 
 //UPDATE a todo by id
-app.patch('/todos/:id', validatePatchTodo, (req, res, next) => {
-  const id = parseInt(req.params.id, 10);
-  const todo = todos.find((todo) => todo.id === id);
+app.patch('/todos/:id', validatePatchTodo, async(req, res, next) => {
 
-  if (!todo) {
-    return res.status(404).json({ error: 'Todo not found' });
+  const id = (req.params.id, 10);
+  const newtodo = await new Todo.findByIdAndUpdate(id);  //Updates the todo in MongoDB database
+
+
+  if (!newtodo) {
+    return res.status(404).json({ error: 'Todo not found' }); 
   }
-
-  Object.assign(todo, req.body);
-  return res.status(200).json({ message: 'Todo updated successfully', todo });
+  return res.status(200).json({ message: 'Todo updated successfully', newtodo });
 });
 
 
 //DELETE a todo by id
-app.delete('/todos/:id' ,(req ,res ,next)=>{
-const id = parseInt(req.params.id);
-const initialLength = todos.length;
-todos = todos.filter((todo) => todo.id !== id);
-if(todos.length === initialLength){
+app.delete('/todos/:id' ,async(req ,res ,next)=>{
+const id = (req.params.id);
+const newtodo = await Todo.findByIdAndDelete(id);  //deletes the todo from MongoDB database
+if(!newtodo){
   return res.status(404).json({message: "Todo not found"}); 
 }
-res.status(200).json({message: "Todo deleted successfully"});
+res.status(200).json({message: `[${newtodo.task}] has been deleted successfully`});
 }
 )
 
